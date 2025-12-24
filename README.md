@@ -189,15 +189,3 @@ The robot will:
 
 This project is open-source for **education and robotics research**.
 You are free to modify, optimize, and expand this code with proper credit.
-
----
-
-If you want, I can also:
-
-* Convert this gait to **trot / ripple**
-* Add **inverse kinematics**
-* Add **speed control**
-* Add **stair climbing**
-* Draw a **leg timing diagram**
-
-Just tell me 👍
