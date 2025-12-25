@@ -50,7 +50,7 @@ struct ServoMap {
   int legRB;
 };
 
-ServoMap leftMap = {
+ServoMap LeftMap = {
   .hipLF = 0,
   .hipRF = 2,
   .hipLB = 4,
@@ -72,17 +72,17 @@ ServoMap RightMap = {
   .legRB = 1
 };
 
-int dt = 100;
-int lift = 100;
-int down = 180;
+int robotDelayMs      = 100;
+int robotLegLiftDeg   = 100;
+int robotLegPlaceDeg  = 180;
 
-int RF_LB_standby = 45;
-int RF_LB_center = 0;
-int LF_RB_standby = 135;
-int LF_RB_center = 180;
+int RF_LB_standby     = 45;
+int RF_LB_center      = 0;
+int LF_RB_standby     = 135;
+int LF_RB_center      = 180;
 
-int rightAngle = 0;
-int leftAngle = 90;
+int rightAngle  = 0;
+int leftAngle   = 90;
 
 int currentAngle = rightAngle;
 int step = 5;             // +1 or -1
@@ -158,158 +158,105 @@ void loop() {
 
 
 void safeLeft() {
-  pca.setPWM(leftMap.hipRF, 0, angleToPulse(90));
-  pca.setPWM(leftMap.hipLB, 0, angleToPulse(RF_LB_standby+20));
-  pca.setPWM(leftMap.hipRB, 0, angleToPulse(LF_RB_standby-15));
-  pca.setPWM(leftMap.hipLF, 0, angleToPulse(90));
-  pca.setPWM(leftMap.legLF, 0, angleToPulse(120));
-  pca.setPWM(leftMap.legRF, 0, angleToPulse(120));
-  pca.setPWM(leftMap.legLB, 0, angleToPulse(down));
-  pca.setPWM(leftMap.legRB, 0, angleToPulse(down));
+  safePose(LeftMap);
 }
 
 void safeRight() {
-  pca.setPWM(RightMap.hipRF, 0, angleToPulse(90));
-  pca.setPWM(RightMap.hipLB, 0, angleToPulse(RF_LB_standby+20));
-  pca.setPWM(RightMap.hipRB, 0, angleToPulse(LF_RB_standby-15));
-  pca.setPWM(RightMap.hipLF, 0, angleToPulse(90));
-  pca.setPWM(RightMap.legLF, 0, angleToPulse(120));
-  pca.setPWM(RightMap.legRF, 0, angleToPulse(120));
-  pca.setPWM(RightMap.legLB, 0, angleToPulse(down));
-  pca.setPWM(RightMap.legRB, 0, angleToPulse(down));
+  safePose(RightMap);
 }
+
+void safePose(const ServoMap& map) {
+  setServo(map.hipRF, 90);
+  setServo(map.hipLB, RF_LB_standby + 20);
+  setServo(map.hipRB, LF_RB_standby - 15);
+  setServo(map.hipLF, 90);
+
+  setServo(map.legLF, 120);
+  setServo(map.legRF, 120);
+  setServo(map.legLB, robotLegPlaceDeg);
+  setServo(map.legRB, robotLegPlaceDeg);
+}
+
 
 void moveLeft() {
-  // --- step 1 --- //
-  // lift LF leg
-  pca.setPWM(leftMap.legLF, 0, angleToPulse(lift));
-  delay(dt);
-  // move LF hip to 110 = 90 + 20
-  pca.setPWM(leftMap.hipLF, 0, angleToPulse(100));
-  delay(dt);
-  // place LF leg
-  pca.setPWM(leftMap.legLF, 0, angleToPulse(down));
-  delay(dt+50);
+  // Step 1: LF
+  stepLeg(LeftMap.legLF, LeftMap.hipLF, 100);
 
-  // --- step 2 --- //
-  // swing LF to standby
-  pca.setPWM(leftMap.hipLF, 0, angleToPulse(LF_RB_center));
-  // swing LB to standby
-  pca.setPWM(leftMap.hipLB, 0, angleToPulse(RF_LB_standby+20));
-  delay(dt+100);
+  // Step 2: swing body
+  swingHips(
+    LeftMap.hipLF, LF_RB_center,
+    LeftMap.hipLB, RF_LB_standby + 20
+  );
 
-  // --- step 3 --- //
-  // lift RB leg
-  pca.setPWM(leftMap.legRB, 0, angleToPulse(lift));
-  delay(dt);
-  // move RB hip to center
-  pca.setPWM(leftMap.hipRB, 0, angleToPulse(LF_RB_center));
-  delay(dt);
-  // place RB leg
-  pca.setPWM(leftMap.legRB, 0, angleToPulse(down));
-  delay(dt+50);
+  // Step 3: RB
+  stepLeg(LeftMap.legRB, LeftMap.hipRB, LF_RB_center);
 
-  // --- step 4 --- //
-  // lift RF leg
-  pca.setPWM(leftMap.legRF, 0, angleToPulse(lift));
-  delay(dt);
-  // move RF hip to 70 = 90 - 20
-  pca.setPWM(leftMap.hipRF, 0, angleToPulse(80));
-  delay(dt);
-  // place RF leg
-  pca.setPWM(leftMap.legRF, 0, angleToPulse(down));
-  delay(dt+50);
+  // Step 4: RF
+  stepLeg(LeftMap.legRF, LeftMap.hipRF, 80);
 
-  // --- step 5 --- //
-  // swing RF to standby
-  pca.setPWM(leftMap.hipRF, 0, angleToPulse(RF_LB_center));
-  // swing RB to standby
-  pca.setPWM(leftMap.hipRB, 0, angleToPulse(LF_RB_standby-15));
-  delay(dt+100);
+  // Step 5: swing body
+  swingHips(
+    LeftMap.hipRF, RF_LB_center,
+    LeftMap.hipRB, LF_RB_standby - 15
+  );
 
-  // --- step 6 --- //
-  // lift LB leg
-  pca.setPWM(leftMap.legLB, 0, angleToPulse(lift));
-  delay(dt);
-  // move LB hip to center
-  pca.setPWM(leftMap.hipLB, 0, angleToPulse(RF_LB_center));
-  delay(dt);
-  // place LB leg
-  pca.setPWM(leftMap.legLB, 0, angleToPulse(down));
-  delay(dt+50);
-
+  // Step 6: LB
+  stepLeg(LeftMap.legLB, LeftMap.hipLB, RF_LB_center);
 }
+
 
 void moveRight() {
-  // --- step 1 --- //
-  // lift LF leg
-  pca.setPWM(RightMap.legLF, 0, angleToPulse(lift));
-  delay(dt);
-  // move LF hip to 110 = 90 + 20
-  pca.setPWM(RightMap.hipLF, 0, angleToPulse(100));
-  delay(dt);
-  // place LF leg
-  pca.setPWM(RightMap.legLF, 0, angleToPulse(down));
-  delay(dt+50);
+  stepLeg(RightMap.legLF, RightMap.hipLF, 100);
 
-  // --- step 2 --- //
-  // swing LF to standby
-  pca.setPWM(RightMap.hipLF, 0, angleToPulse(LF_RB_center));
-  // swing LB to standby
-  pca.setPWM(RightMap.hipLB, 0, angleToPulse(RF_LB_standby+20));
-  delay(dt+100);
+  swingHips(
+    RightMap.hipLF, LF_RB_center,
+    RightMap.hipLB, RF_LB_standby + 20
+  );
 
-  // --- step 3 --- //
-  // lift RB leg
-  pca.setPWM(RightMap.legRB, 0, angleToPulse(lift));
-  delay(dt);
-  // move RB hip to center
-  pca.setPWM(RightMap.hipRB, 0, angleToPulse(LF_RB_center));
-  delay(dt);
-  // place RB leg
-  pca.setPWM(RightMap.legRB, 0, angleToPulse(down));
-  delay(dt+50);
+  stepLeg(RightMap.legRB, RightMap.hipRB, LF_RB_center);
 
-  // --- step 4 --- //
-  // lift RF leg
-  pca.setPWM(RightMap.legRF, 0, angleToPulse(lift));
-  delay(dt);
-  // move RF hip to 70 = 90 - 20
-  pca.setPWM(RightMap.hipRF, 0, angleToPulse(80));
-  delay(dt);
-  // place RF leg
-  pca.setPWM(RightMap.legRF, 0, angleToPulse(down));
-  delay(dt+50);
+  stepLeg(RightMap.legRF, RightMap.hipRF, 80);
 
-  // --- step 5 --- //
-  // swing RF to standby
-  pca.setPWM(RightMap.hipRF, 0, angleToPulse(RF_LB_center));
-  // swing RB to standby
-  pca.setPWM(RightMap.hipRB, 0, angleToPulse(LF_RB_standby-15));
-  delay(dt+100);
+  swingHips(
+    RightMap.hipRF, RF_LB_center,
+    RightMap.hipRB, LF_RB_standby - 15
+  );
 
-  // --- step 6 --- //
-  // lift LB leg
-  pca.setPWM(RightMap.legLB, 0, angleToPulse(lift));
-  delay(dt);
-  // move LB hip to center
-  pca.setPWM(RightMap.hipLB, 0, angleToPulse(RF_LB_center));
-  delay(dt);
-  // place LB leg
-  pca.setPWM(RightMap.legLB, 0, angleToPulse(down));
-  delay(dt+50);
-
+  stepLeg(RightMap.legLB, RightMap.hipLB, RF_LB_center);
 }
 
+
 void standBy() {
-  pca.setPWM(leftMap.hipRF, 0, angleToPulse(RF_LB_standby));
-  pca.setPWM(leftMap.hipLB, 0, angleToPulse(RF_LB_standby+20));
-  pca.setPWM(leftMap.hipRB, 0, angleToPulse(LF_RB_standby-15));
-  pca.setPWM(leftMap.hipLF, 0, angleToPulse(LF_RB_standby));
-  pca.setPWM(leftMap.legLF, 0, angleToPulse(down));
-  pca.setPWM(leftMap.legRF, 0, angleToPulse(down));
-  pca.setPWM(leftMap.legLB, 0, angleToPulse(down));
-  pca.setPWM(leftMap.legRB, 0, angleToPulse(down));
+  setServo(LeftMap.hipRF, RF_LB_standby);
+  setServo(LeftMap.hipLB, RF_LB_standby + 20);
+  setServo(LeftMap.hipRB, LF_RB_standby - 15);
+  setServo(LeftMap.hipLF, LF_RB_standby);
+
+  setServo(LeftMap.legLF, robotLegPlaceDeg);
+  setServo(LeftMap.legRF, robotLegPlaceDeg);
+  setServo(LeftMap.legLB, robotLegPlaceDeg);
+  setServo(LeftMap.legRB, robotLegPlaceDeg);
+}
+
+void stepLeg(int leg, int hip, int hipAngle) {
+  setServo(leg, robotLegLiftDeg);
+  delay(robotDelayMs);
+
+  setServo(hip, hipAngle);
+  delay(robotDelayMs);
+
+  setServo(leg, robotLegPlaceDeg);
+  delay(robotDelayMs + 50);
+}
+
+void swingHips(int hip1, int ang1, int hip2, int ang2) {
+  setServo(hip1, ang1);
+  setServo(hip2, ang2);
+  delay(robotDelayMs + 100);
+}
+
+void setServo(int channel, int angle) {
+  pca.setPWM(channel, 0, angleToPulse(angle));
 }
 
 int angleToPulse(float ang) {
@@ -332,7 +279,7 @@ int getDistance() {
   return duration / 58;
 }
 
-int TEST_MOVE_LEFT_RIGHT() {
+void TEST_MOVE_LEFT_RIGHT() {
   for (int i  = 0; i <= 7; i++) {
     if (i < 4) {
       moveLeft();
