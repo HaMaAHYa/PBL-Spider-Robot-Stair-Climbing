@@ -1,3 +1,19 @@
+/*
+
+         ROBOT CONFIGULATION                                  
+
+            90        90                                              
+            |    ^    |                                               
+    180_____|____|____|_____0                                       
+            |0       2|                                       
+            |         |                                 
+      0_____|4_______6|_____180                 
+            |         |                       
+            |         |                         
+            90        90                          
+
+*/
+
 #include <Wire.h>
 #include <Adafruit_PWMServoDriver.h>
 
@@ -6,6 +22,19 @@
 
 Adafruit_PWMServoDriver pca = Adafruit_PWMServoDriver();
 
+int robotDelayMs      = 100;
+int robotLegLiftDeg   = 100;
+int robotLegPlaceDeg  = 180;
+
+int RF_LB_standby     = 45;
+int RF_LB_center      = 0;
+int LF_RB_standby     = 135;
+int LF_RB_center      = 180;
+
+const int hipLF = 0, legLF = 1;
+const int hipRF = 2, legRF = 3;
+const int hipLB = 4, legLB = 5;
+const int hipRB = 6, legRB = 7;
 
 void setup() {
   Serial.begin(9600);
@@ -13,103 +42,60 @@ void setup() {
   pca.reset();
   pca.setPWMFreq(60);
 
-
   standBy();
   delay(4000);
 }
 
-int dt = 100;
-int lift = 100;
-int down = 180;
-
-int RF_LB_standby = 45;
-int RF_LB_center = 0;
-int LF_RB_standby = 135;
-int LF_RB_center = 180;
-
-const int LF_hip = 0;
-const int RF_hip = 2;
-const int LB_hip = 4;
-const int RB_hip = 6;
-const int LF_leg = 1;
-const int RF_leg = 3;
-const int LB_leg = 5;
-const int RB_leg = 7;
-
-
 void loop() {
-  // --- step 1 --- //
-  // lift LF leg
-  pca.setPWM(LF_leg, 0, angleToPulse(lift));
-  delay(dt);
-  // move LF hip to 110 = 90 + 20
-  pca.setPWM(LF_hip, 0, angleToPulse(100));
-  delay(dt);
-  // place LF leg
-  pca.setPWM(LF_leg, 0, angleToPulse(down));
-  delay(dt+50);
+  stepLeg(legLF, hipLF, 100);
+  swingHips(
+    hipLF, LF_RB_center,
+    hipLB, RF_LB_standby + 20
+  );
 
-  // --- step 2 --- //
-  // swing LF to standby
-  pca.setPWM(LF_hip, 0, angleToPulse(LF_RB_center));
-  // swing LB to standby
-  pca.setPWM(LB_hip, 0, angleToPulse(RF_LB_standby+20));
-  delay(dt+100);
+  stepLeg(legRB, hipRB, LF_RB_center);
+  stepLeg(legRF, hipRF, 80);
 
-  // --- step 3 --- //
-  // lift RB leg
-  pca.setPWM(RB_leg, 0, angleToPulse(lift));
-  delay(dt);
-  // move RB hip to center
-  pca.setPWM(RB_hip, 0, angleToPulse(LF_RB_center));
-  delay(dt);
-  // place RB leg
-  pca.setPWM(RB_leg, 0, angleToPulse(down));
-  delay(dt+50);
+  swingHips(
+    hipRF, RF_LB_center,
+    hipRB, LF_RB_standby - 15
+  );
 
-  // --- step 4 --- //
-  // lift RF leg
-  pca.setPWM(RF_leg, 0, angleToPulse(lift));
-  delay(dt);
-  // move RF hip to 70 = 90 - 20
-  pca.setPWM(RF_hip, 0, angleToPulse(80));
-  delay(dt);
-  // place RF leg
-  pca.setPWM(RF_leg, 0, angleToPulse(down));
-  delay(dt+50);
+  stepLeg(legLB, hipLB, RF_LB_center);
+}
 
-  // --- step 5 --- //
-  // swing RF to standby
-  pca.setPWM(RF_hip, 0, angleToPulse(RF_LB_center));
-  // swing RB to standby
-  pca.setPWM(RB_hip, 0, angleToPulse(LF_RB_standby-15));
-  delay(dt+100);
+void stepLeg(int leg, int hip, int hipAngle) {
+  setServo(leg, robotLegLiftDeg);
+  delay(robotDelayMs);
 
-  // --- step 6 --- //
-  // lift LB leg
-  pca.setPWM(LB_leg, 0, angleToPulse(lift));
-  delay(dt);
-  // move LB hip to center
-  pca.setPWM(LB_hip, 0, angleToPulse(RF_LB_center));
-  delay(dt);
-  // place LB leg
-  pca.setPWM(LB_leg, 0, angleToPulse(down));
-  delay(dt+50);
+  setServo(hip, hipAngle);
+  delay(robotDelayMs);
 
+  setServo(leg, robotLegPlaceDeg);
+  delay(robotDelayMs + 50);
+}
+
+void swingHips(int hip1, int ang1, int hip2, int ang2) {
+  setServo(hip1, ang1);
+  setServo(hip2, ang2);
+  delay(robotDelayMs + 100);
 }
 
 void standBy() {
-  pca.setPWM(RF_hip, 0, angleToPulse(RF_LB_standby));
-  pca.setPWM(LB_hip, 0, angleToPulse(RF_LB_standby+20));
-  pca.setPWM(RB_hip, 0, angleToPulse(LF_RB_standby-15));
-  pca.setPWM(LF_hip, 0, angleToPulse(LF_RB_standby));
-  pca.setPWM(RF_leg, 0, angleToPulse(down));
-  pca.setPWM(RB_leg, 0, angleToPulse(down));
-  pca.setPWM(LF_leg, 0, angleToPulse(down));
-  pca.setPWM(LB_leg, 0, angleToPulse(down));
+  setServo(hipRF, RF_LB_standby);
+  setServo(hipLB, RF_LB_standby + 20);
+  setServo(hipRB, LF_RB_standby - 15);
+  setServo(hipLF, LF_RB_standby);
 
+  setServo(legLF, robotLegPlaceDeg);
+  setServo(legRF, robotLegPlaceDeg);
+  setServo(legLB, robotLegPlaceDeg);
+  setServo(legRB, robotLegPlaceDeg);
 }
 
+void setServo(int channel, int angle) {
+  pca.setPWM(channel, 0, angleToPulse(angle));
+}
 
 int angleToPulse(float ang) {
   return map((int)ang, 0, 180, SERVOMIN, SERVOMAX);
