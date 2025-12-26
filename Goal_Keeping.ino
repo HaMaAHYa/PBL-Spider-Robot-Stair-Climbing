@@ -11,14 +11,18 @@
             |         |                       
             |         |                         
             90        90         
-
-
-            12 echo13 ultrasonic
-            8 to driver servo for sensor                 
+           
+to do:
+  CHANGE THE MOVEMENT AND MAKE IT MOVE FASTER
+  
 
 */
 
 String command = "";
+
+#define MAX_ANGLE 180
+int distanceMap[MAX_ANGLE + 1];
+
 #include <Wire.h>
 #include <Adafruit_PWMServoDriver.h>
 
@@ -85,9 +89,66 @@ int rightAngle  = 0;
 int leftAngle   = 90;
 
 int currentAngle = rightAngle;
-int step = 5;             // +1 or -1
+int step = 5;
 unsigned long lastMove = 0;
-unsigned long scanStepTime = 20; // ms
+unsigned long scanStepTime = 10;
+
+int nearestDistance = 999;
+int nearestAngle = 0;
+
+unsigned long scanStartTime = 0;
+unsigned long scanDuration = 1500;
+
+// Movement state machine
+enum MovementState {
+  IDLE,
+  MOVE_LEFT_STEP1,
+  MOVE_LEFT_STEP1_WAIT,
+  MOVE_LEFT_STEP2,
+  MOVE_LEFT_STEP2_WAIT,
+  MOVE_LEFT_STEP3,
+  MOVE_LEFT_STEP3_WAIT,
+  MOVE_LEFT_STEP4,
+  MOVE_LEFT_STEP4_WAIT,
+  MOVE_LEFT_STEP5,
+  MOVE_LEFT_STEP5_WAIT,
+  MOVE_LEFT_STEP6,
+  MOVE_LEFT_STEP6_WAIT,
+  MOVE_RIGHT_STEP1,
+  MOVE_RIGHT_STEP1_WAIT,
+  MOVE_RIGHT_STEP2,
+  MOVE_RIGHT_STEP2_WAIT,
+  MOVE_RIGHT_STEP3,
+  MOVE_RIGHT_STEP3_WAIT,
+  MOVE_RIGHT_STEP4,
+  MOVE_RIGHT_STEP4_WAIT,
+  MOVE_RIGHT_STEP5,
+  MOVE_RIGHT_STEP5_WAIT,
+  MOVE_RIGHT_STEP6,
+  MOVE_RIGHT_STEP6_WAIT
+};
+
+MovementState movementState = IDLE;
+unsigned long movementTimer = 0;
+
+// Sub-states for stepLeg
+enum StepLegSubState {
+  STEPLEG_LIFT,
+  STEPLEG_MOVE,
+  STEPLEG_PLACE,
+  STEPLEG_DONE
+};
+
+StepLegSubState stepLegSubState = STEPLEG_DONE;
+int stepLeg_leg, stepLeg_hip, stepLeg_hipAngle;
+
+// Sub-states for swingHips
+enum SwingHipsSubState {
+  SWINGHIPS_MOVE,
+  SWINGHIPS_DONE
+};
+
+SwingHipsSubState swingHipsSubState = SWINGHIPS_DONE;
 
 void setup() {
   Serial.begin(9600);
@@ -98,70 +159,281 @@ void setup() {
   pinMode(TRIG_PIN, OUTPUT);
   pinMode(ECHO_PIN, INPUT);
 
+  for (int i = 0; i <= MAX_ANGLE; i++) {
+    distanceMap[i] = -1;
+  }
+
   standBy();
-  delay(4000);
+  delay(3000);
 }
 
 void loop() {
-  /*
-   unsigned long now = millis();
+  unsigned long now = millis();
 
-  // Move servo step-by-step
+  if (scanStartTime == 0) {
+    scanStartTime = now;
+  }
+
+  // ================= SCANNING =================
   if (now - lastMove >= scanStepTime) {
     lastMove = now;
 
     currentAngle += step;
 
-    // Reverse direction at limits
     if (currentAngle >= leftAngle || currentAngle <= rightAngle) {
       step = -step;
     }
 
-    pca.setPWM(sensorServo, 0, angleToPulse(currentAngle));
+    setServo(sensorServo, currentAngle);
 
-    // Read sensor at SAME TIME
     int distance = getDistance();
+
+    if (distance > 0 && distance < nearestDistance) {
+      nearestDistance = distance;
+      nearestAngle = currentAngle;
+    }
 
     Serial.print("Angle: ");
     Serial.print(currentAngle);
     Serial.print("  Distance: ");
     Serial.print(distance);
-    Serial.println(" cm");
-  }
-  */
-  
-  if (Serial.available() > 0) {
-    command = Serial.readStringUntil('\n');
-    command.trim();
+    Serial.print("  Nearest Distance: ");
+    Serial.print(nearestDistance);
+    Serial.print("  Nearest Angle: ");
+    Serial.println(nearestAngle);
 
-    if (command == "l") {
-        Serial.println("Left");
-        for (int i = 0; i < 2; i++) {
-          moveLeft();
-        }
-        safeLeft();
-      } else if (command == "r") {
-        Serial.println("Right");
-        for (int i = 0; i < 2; i++) {
-          moveRight();
-        }
-        safeRight();
-      } else if (command == "s") {
+    // Only trigger movement if idle
+    if (movementState == IDLE) {
+      if (nearestAngle > 60) {
+        startMoveLeft();
+      } else if (nearestAngle > 40) {
         standBy();
-        Serial.println("stand");
+      } else {
+        startMoveRight();
       }
+    }
   }
 
+  // Process movement state machine
+  processMovement(now);
+
+  // Testing via monitor
+  movementTestingViaMonitor();
 }
 
+void processMovement(unsigned long now) {
+  if (movementState == IDLE) return;
 
+  switch (movementState) {
+    // ================= MOVE LEFT =================
+    case MOVE_LEFT_STEP1:
+      stepLegStart(LeftMap.legLF, LeftMap.hipLF, 100);
+      movementState = MOVE_LEFT_STEP1_WAIT;
+      break;
 
+    case MOVE_LEFT_STEP1_WAIT:
+      if (stepLegProcess(now)) {
+        movementState = MOVE_LEFT_STEP2;
+      }
+      break;
 
-void safeLeft() {
+    case MOVE_LEFT_STEP2:
+      swingHipsStart(LeftMap.hipLF, LF_RB_center, LeftMap.hipLB, RF_LB_standby + 20);
+      movementState = MOVE_LEFT_STEP2_WAIT;
+      break;
+
+    case MOVE_LEFT_STEP2_WAIT:
+      if (swingHipsProcess(now)) {
+        movementState = MOVE_LEFT_STEP3;
+      }
+      break;
+
+    case MOVE_LEFT_STEP3:
+      stepLegStart(LeftMap.legRB, LeftMap.hipRB, LF_RB_center);
+      movementState = MOVE_LEFT_STEP3_WAIT;
+      break;
+
+    case MOVE_LEFT_STEP3_WAIT:
+      if (stepLegProcess(now)) {
+        movementState = MOVE_LEFT_STEP4;
+      }
+      break;
+
+    case MOVE_LEFT_STEP4:
+      stepLegStart(LeftMap.legRF, LeftMap.hipRF, 80);
+      movementState = MOVE_LEFT_STEP4_WAIT;
+      break;
+
+    case MOVE_LEFT_STEP4_WAIT:
+      if (stepLegProcess(now)) {
+        movementState = MOVE_LEFT_STEP5;
+      }
+      break;
+
+    case MOVE_LEFT_STEP5:
+      swingHipsStart(LeftMap.hipRF, RF_LB_center, LeftMap.hipRB, LF_RB_standby - 15);
+      movementState = MOVE_LEFT_STEP5_WAIT;
+      break;
+
+    case MOVE_LEFT_STEP5_WAIT:
+      if (swingHipsProcess(now)) {
+        movementState = MOVE_LEFT_STEP6;
+      }
+      break;
+
+    case MOVE_LEFT_STEP6:
+      stepLegStart(LeftMap.legLB, LeftMap.hipLB, RF_LB_center);
+      movementState = MOVE_LEFT_STEP6_WAIT;
+      break;
+
+    case MOVE_LEFT_STEP6_WAIT:
+      if (stepLegProcess(now)) {
+        movementState = IDLE;
+      }
+      break;
+
+    // ================= MOVE RIGHT =================
+    case MOVE_RIGHT_STEP1:
+      stepLegStart(RightMap.legLF, RightMap.hipLF, 100);
+      movementState = MOVE_RIGHT_STEP1_WAIT;
+      break;
+
+    case MOVE_RIGHT_STEP1_WAIT:
+      if (stepLegProcess(now)) {
+        movementState = MOVE_RIGHT_STEP2;
+      }
+      break;
+
+    case MOVE_RIGHT_STEP2:
+      swingHipsStart(RightMap.hipLF, LF_RB_center, RightMap.hipLB, RF_LB_standby + 20);
+      movementState = MOVE_RIGHT_STEP2_WAIT;
+      break;
+
+    case MOVE_RIGHT_STEP2_WAIT:
+      if (swingHipsProcess(now)) {
+        movementState = MOVE_RIGHT_STEP3;
+      }
+      break;
+
+    case MOVE_RIGHT_STEP3:
+      stepLegStart(RightMap.legRB, RightMap.hipRB, LF_RB_center);
+      movementState = MOVE_RIGHT_STEP3_WAIT;
+      break;
+
+    case MOVE_RIGHT_STEP3_WAIT:
+      if (stepLegProcess(now)) {
+        movementState = MOVE_RIGHT_STEP4;
+      }
+      break;
+
+    case MOVE_RIGHT_STEP4:
+      stepLegStart(RightMap.legRF, RightMap.hipRF, 80);
+      movementState = MOVE_RIGHT_STEP4_WAIT;
+      break;
+
+    case MOVE_RIGHT_STEP4_WAIT:
+      if (stepLegProcess(now)) {
+        movementState = MOVE_RIGHT_STEP5;
+      }
+      break;
+
+    case MOVE_RIGHT_STEP5:
+      swingHipsStart(RightMap.hipRF, RF_LB_center, RightMap.hipRB, LF_RB_standby - 15);
+      movementState = MOVE_RIGHT_STEP5_WAIT;
+      break;
+
+    case MOVE_RIGHT_STEP5_WAIT:
+      if (swingHipsProcess(now)) {
+        movementState = MOVE_RIGHT_STEP6;
+      }
+      break;
+
+    case MOVE_RIGHT_STEP6:
+      stepLegStart(RightMap.legLB, RightMap.hipLB, RF_LB_center);
+      movementState = MOVE_RIGHT_STEP6_WAIT;
+      break;
+
+    case MOVE_RIGHT_STEP6_WAIT:
+      if (stepLegProcess(now)) {
+        movementState = IDLE;
+      }
+      break;
+  }
+}
+
+// ================= STEPLEG FUNCTIONS =================
+void stepLegStart(int leg, int hip, int hipAngle) {
+  stepLeg_leg = leg;
+  stepLeg_hip = hip;
+  stepLeg_hipAngle = hipAngle;
+  stepLegSubState = STEPLEG_LIFT;
+  movementTimer = millis();
+}
+
+bool stepLegProcess(unsigned long now) {
+  if (now - movementTimer < robotDelayMs) return false;
+
+  switch (stepLegSubState) {
+    case STEPLEG_LIFT:
+      setServo(stepLeg_leg, robotLegLiftDeg);
+      stepLegSubState = STEPLEG_MOVE;
+      movementTimer = now;
+      return false;
+
+    case STEPLEG_MOVE:
+      setServo(stepLeg_hip, stepLeg_hipAngle);
+      stepLegSubState = STEPLEG_PLACE;
+      movementTimer = now;
+      return false;
+
+    case STEPLEG_PLACE:
+      setServo(stepLeg_leg, robotLegPlaceDeg);
+      stepLegSubState = STEPLEG_DONE;
+      movementTimer = now;
+      return false;
+
+    case STEPLEG_DONE:
+      if (now - movementTimer >= 50) {  // Extra 50ms delay
+        return true;  // Completed
+      }
+      return false;
+  }
+  return false;
+}
+
+// ================= SWINGHIPS FUNCTIONS =================
+void swingHipsStart(int hip1, int ang1, int hip2, int ang2) {
+  setServo(hip1, ang1);
+  setServo(hip2, ang2);
+  swingHipsSubState = SWINGHIPS_MOVE;
+  movementTimer = millis();
+}
+
+bool swingHipsProcess(unsigned long now) {
+  if (swingHipsSubState == SWINGHIPS_MOVE) {
+    if (now - movementTimer >= robotDelayMs + 100) {
+      swingHipsSubState = SWINGHIPS_DONE;
+      return true;  // Completed
+    }
+  }
+  return false;
+}
+
+void startMoveLeft() {
+  standBy();
+  movementState = MOVE_LEFT_STEP1;
+}
+
+void startMoveRight() {
+  standBy();
+  movementState = MOVE_RIGHT_STEP1;
+}
+
+void driveLeft() {
   safePose(LeftMap);
 }
 
-void safeRight() {
+void driveRight() {
   safePose(RightMap);
 }
 
@@ -172,59 +444,10 @@ void safePose(const ServoMap& map) {
   setServo(map.hipLF, 90);
 
   setServo(map.legLF, 120);
-  setServo(map.legRF, 120);
+  setServo(map.legRF, 45);
   setServo(map.legLB, robotLegPlaceDeg);
   setServo(map.legRB, robotLegPlaceDeg);
 }
-
-
-void moveLeft() {
-  // Step 1: LF
-  stepLeg(LeftMap.legLF, LeftMap.hipLF, 100);
-
-  // Step 2: swing body
-  swingHips(
-    LeftMap.hipLF, LF_RB_center,
-    LeftMap.hipLB, RF_LB_standby + 20
-  );
-
-  // Step 3: RB
-  stepLeg(LeftMap.legRB, LeftMap.hipRB, LF_RB_center);
-
-  // Step 4: RF
-  stepLeg(LeftMap.legRF, LeftMap.hipRF, 80);
-
-  // Step 5: swing body
-  swingHips(
-    LeftMap.hipRF, RF_LB_center,
-    LeftMap.hipRB, LF_RB_standby - 15
-  );
-
-  // Step 6: LB
-  stepLeg(LeftMap.legLB, LeftMap.hipLB, RF_LB_center);
-}
-
-
-void moveRight() {
-  stepLeg(RightMap.legLF, RightMap.hipLF, 100);
-
-  swingHips(
-    RightMap.hipLF, LF_RB_center,
-    RightMap.hipLB, RF_LB_standby + 20
-  );
-
-  stepLeg(RightMap.legRB, RightMap.hipRB, LF_RB_center);
-
-  stepLeg(RightMap.legRF, RightMap.hipRF, 80);
-
-  swingHips(
-    RightMap.hipRF, RF_LB_center,
-    RightMap.hipRB, LF_RB_standby - 15
-  );
-
-  stepLeg(RightMap.legLB, RightMap.hipLB, RF_LB_center);
-}
-
 
 void standBy() {
   setServo(LeftMap.hipRF, RF_LB_standby);
@@ -236,23 +459,6 @@ void standBy() {
   setServo(LeftMap.legRF, robotLegPlaceDeg);
   setServo(LeftMap.legLB, robotLegPlaceDeg);
   setServo(LeftMap.legRB, robotLegPlaceDeg);
-}
-
-void stepLeg(int leg, int hip, int hipAngle) {
-  setServo(leg, robotLegLiftDeg);
-  delay(robotDelayMs);
-
-  setServo(hip, hipAngle);
-  delay(robotDelayMs);
-
-  setServo(leg, robotLegPlaceDeg);
-  delay(robotDelayMs + 50);
-}
-
-void swingHips(int hip1, int ang1, int hip2, int ang2) {
-  setServo(hip1, ang1);
-  setServo(hip2, ang2);
-  delay(robotDelayMs + 100);
 }
 
 void setServo(int channel, int angle) {
@@ -279,17 +485,21 @@ int getDistance() {
   return duration / 58;
 }
 
-void TEST_MOVE_LEFT_RIGHT() {
-  for (int i  = 0; i <= 7; i++) {
-    if (i < 4) {
-      moveLeft();
-    } else if ( i == 4) {
+void movementTestingViaMonitor() {
+  if (Serial.available() > 0) {
+    command = Serial.readStringUntil('\n');
+    command.trim();
+
+    if (command == "l" && movementState == IDLE) {
+      Serial.println("Left");
+      startMoveLeft();
+    } else if (command == "r" && movementState == IDLE) {
+      Serial.println("Right");
+      startMoveRight();
+    } else if (command == "s") {
       standBy();
-      delay(500);
-    } else {
-      moveRight();
+      movementState = IDLE;
+      Serial.println("stand");
     }
   }
-  standBy();
-  delay(500);
 }
